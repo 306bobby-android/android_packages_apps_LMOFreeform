@@ -5,8 +5,12 @@ import static com.libremobileos.freeform.server.Debug.dlog;
 import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.IIntentSender;
+import android.content.pm.ActivityInfo;
+import android.hardware.display.DisplayManager;
 import android.os.Handler;
 import android.util.ArrayMap;
+import android.util.DisplayMetrics;
 import android.util.Slog;
 
 import java.util.HashMap;
@@ -21,8 +25,31 @@ public class FreeformWindowManager {
             PendingIntent pendingIntent, int width, int height, int densityDpi) {
         AppConfig appConfig = new AppConfig(packageName, activityName, pendingIntent, userId, taskId);
         FreeformConfig freeformConfig = new FreeformConfig(width, height, densityDpi);
-        FreeformWindow window = new FreeformWindow(handler, context, appConfig, freeformConfig);
-        dlog(TAG, "addWindow: " + packageName + "/" + activityName + ", freeformId=" + window.getFreeformId()
+        addWindow(new FreeformWindow(handler, context, appConfig, freeformConfig));
+    }
+
+    /**
+     * Called in system handler
+     */
+    public static void addDesktopWindow(Handler handler, Context context, IIntentSender target,
+            ActivityInfo aInfo, int userId, int hostDisplayId) {
+        registerDisplayListener(handler, context);
+        String freeformId = aInfo.packageName + "," + aInfo.name + "," + userId;
+        FreeformWindow existing = freeformWindows.get(freeformId);
+        if (existing != null && existing.getHostDisplayId() == hostDisplayId) {
+            dlog(TAG, "addDesktopWindow: reusing " + freeformId);
+            existing.relaunch(target);
+            return;
+        }
+        AppConfig appConfig = new AppConfig(aInfo.packageName, aInfo.name, null, userId, -1,
+                target, hostDisplayId);
+        // Real size and density are taken from the host display in FreeformWindow.
+        FreeformConfig freeformConfig = new FreeformConfig(0, 0, DisplayMetrics.DENSITY_DEFAULT);
+        addWindow(new FreeformWindow(handler, context, appConfig, freeformConfig));
+    }
+
+    private static void addWindow(FreeformWindow window) {
+        dlog(TAG, "addWindow: freeformId=" + window.getFreeformId()
                 + ", existing freeformWindows=" + freeformWindows);
         FreeformWindow oldWindow = freeformWindows.get(window.getFreeformId());
         if (oldWindow != null) {

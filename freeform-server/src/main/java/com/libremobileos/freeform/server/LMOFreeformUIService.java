@@ -21,6 +21,7 @@ import java.util.Map;
 import com.libremobileos.freeform.ILMOFreeformDisplayCallback;
 import com.libremobileos.freeform.ILMOFreeformUIService;
 import com.libremobileos.freeform.server.ui.FreeformWindowManager;
+import com.android.server.wm.LMOFreeformDesktop;
 
 public class LMOFreeformUIService extends ILMOFreeformUIService.Stub {
 
@@ -43,6 +44,9 @@ public class LMOFreeformUIService extends ILMOFreeformUIService.Stub {
         // this.handler = displayManager.getHandler();
 
         SystemServiceHolder.init();
+        LMOFreeformDesktop.setLauncher((target, aInfo, userId, hostDisplayId) ->
+                handler.post(() -> FreeformWindowManager.addDesktopWindow(
+                        handler, systemContext, target, aInfo, userId, hostDisplayId)));
         try {
             ServiceManager.addService(SERVICE_NAME, this);
             Map<String, IBinder> cache = new ArrayMap<>();

@@ -2,6 +2,7 @@ package com.libremobileos.freeform.server.ui
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.IIntentSender
 import android.graphics.drawable.Drawable
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
@@ -179,6 +180,9 @@ class FreeformWindow(
                     Slog.e(TAG, "failed to move task ${appConfig.taskId}: $e, fallback to startApp")
                     startApp()
                 }
+            } else if (appConfig.intentSender != null) {
+                if (!LMOFreeformServiceHolder.startIntentSender(appConfig.intentSender, displayId))
+                    destroy("onDisplayAdd:startIntentSender failed")
             } else if (appConfig.userId == -100) {
                 if (appConfig.pendingIntent == null) destroy("onDisplayAdd:userId=-100, but pendingIntent is null")
                 else {
@@ -240,6 +244,13 @@ class FreeformWindow(
         LMOFreeformServiceHolder.touch(newEvent, displayId)
         newEvent.recycle()
         return true
+    }
+
+    fun relaunch(target: IIntentSender) {
+        FreeformWindowManager.raiseWindow(this)
+        if (displayId != Display.INVALID_DISPLAY) {
+            LMOFreeformServiceHolder.startIntentSender(target, displayId)
+        }
     }
 
     /**

@@ -2,6 +2,7 @@ package com.libremobileos.freeform.server;
 
 import static com.libremobileos.freeform.server.Debug.dlog;
 
+import android.app.ActivityManager;
 import android.app.ActivityThread;
 import android.app.IApplicationThread;
 import android.annotation.SuppressLint;
@@ -9,6 +10,7 @@ import android.app.ActivityOptions;
 import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.IIntentSender;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
@@ -82,6 +84,26 @@ public class LMOFreeformServiceHolder {
             Slog.e(TAG, "startApp failed", e);
             return false;
         }
+    }
+
+    public static boolean startIntentSender(IIntentSender target, int displayId) {
+        ActivityOptions activityOptions = ActivityOptions.makeBasic();
+        activityOptions.setLaunchDisplayId(displayId);
+        activityOptions.setCallerDisplayId(displayId);
+        // The creator was already cleared for BAL when WM intercepted the original start.
+        activityOptions.setPendingIntentBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS);
+        final IApplicationThread app = ActivityThread.currentActivityThread()
+                .getApplicationThread();
+        try {
+            int res = SystemServiceHolder.activityManager.sendIntentSender(app, target, null, 0,
+                    null, null, null, null, activityOptions.toBundle());
+            if (ActivityManager.isStartResultSuccessful(res)) return true;
+            Slog.e(TAG, "startIntentSender failed: " + res);
+        } catch (RemoteException e) {
+            Slog.e(TAG, "startIntentSender failed!", e);
+        }
+        return false;
     }
 
     public static void startPendingIntent(PendingIntent pendingIntent, int displayId) {
