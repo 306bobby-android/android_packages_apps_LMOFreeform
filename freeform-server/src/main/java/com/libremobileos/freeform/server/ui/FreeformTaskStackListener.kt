@@ -19,6 +19,11 @@ class FreeformTaskStackListener(
 ) : ITaskStackListener.Stub() {
 
     var taskId = -1
+        set(value) {
+            if (field == value) return
+            field = value
+            window.onTaskIdChanged()
+        }
 
     companion object {
         private const val TAG = "LMOFreeform/FreeformTaskStackListener"
@@ -90,6 +95,7 @@ class FreeformTaskStackListener(
         if (this.displayId == displayId) {
             taskId = taskInfo.taskId
             dlog(TAG, "onTaskMovedToFront $taskId")
+            window.onTaskMovedToFront()
         }
     }
 

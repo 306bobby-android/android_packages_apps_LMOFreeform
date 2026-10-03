@@ -18,7 +18,9 @@ import android.view.Surface;
 
 import java.util.Map;
 
+import com.libremobileos.freeform.ILMOFreeformDesktopListener;
 import com.libremobileos.freeform.ILMOFreeformDisplayCallback;
+import com.libremobileos.freeform.LMOFreeformDesktopWindow;
 import com.libremobileos.freeform.ILMOFreeformUIService;
 import com.libremobileos.freeform.server.ui.FreeformWindowManager;
 import com.android.server.wm.LMOFreeformDesktop;
@@ -116,6 +118,35 @@ public class LMOFreeformUIService extends ILMOFreeformUIService.Stub {
 
     public void setFreeformSurface(IBinder appToken, Surface surface) {
         displayManager.setFreeformSurface(appToken, surface);
+    }
+
+    @Override
+    public LMOFreeformDesktopWindow[] getDesktopWindows() {
+        enforceDesktopCaller();
+        return FreeformWindowManager.getDesktopWindows();
+    }
+
+    @Override
+    public void registerDesktopListener(ILMOFreeformDesktopListener listener) {
+        enforceDesktopCaller();
+        FreeformWindowManager.registerDesktopListener(listener);
+    }
+
+    @Override
+    public void unregisterDesktopListener(ILMOFreeformDesktopListener listener) {
+        enforceDesktopCaller();
+        FreeformWindowManager.unregisterDesktopListener(listener);
+    }
+
+    @Override
+    public void toggleDesktopWindow(int taskId) {
+        enforceDesktopCaller();
+        handler.post(() -> FreeformWindowManager.toggleDesktopWindow(taskId));
+    }
+
+    private void enforceDesktopCaller() {
+        systemContext.enforceCallingOrSelfPermission(
+                android.Manifest.permission.MANAGE_ACTIVITY_TASKS, "LMOFreeform desktop");
     }
 
     @Override

@@ -5,7 +5,9 @@ import android.content.ComponentName;
 import android.view.InputEvent;
 import android.view.Surface;
 import android.os.IBinder;
+import com.libremobileos.freeform.ILMOFreeformDesktopListener;
 import com.libremobileos.freeform.ILMOFreeformDisplayCallback;
+import com.libremobileos.freeform.LMOFreeformDesktopWindow;
 
 /** {@hide} */
 @PermissionManuallyEnforced
@@ -23,4 +25,11 @@ interface ILMOFreeformUIService {
     void resizeFreeform(IBinder appToken, int width, int height, int densityDpi) = 3;
     void releaseFreeform(IBinder appToken) = 4;
     boolean ping() = 5;
+
+    // Desktop windows hosted on external displays; callers need MANAGE_ACTIVITY_TASKS.
+    LMOFreeformDesktopWindow[] getDesktopWindows() = 6;
+    void registerDesktopListener(ILMOFreeformDesktopListener listener) = 7;
+    void unregisterDesktopListener(ILMOFreeformDesktopListener listener) = 8;
+    // Restores a minimized window, raises a background one, or minimizes the front one.
+    void toggleDesktopWindow(int taskId) = 9;
 }

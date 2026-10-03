@@ -360,6 +360,25 @@ class FreeformWindow(
         FreeformWindowManager.onWindowRestored(this)
     }
 
+    fun getTaskId(): Int = freeformTaskStackListener?.taskId ?: -1
+
+    fun getDisplayId(): Int = displayId
+
+    fun getUserId(): Int = appConfig.userId
+
+    fun getPackageName(): String = appConfig.packageName
+
+    fun onTaskIdChanged() {
+        handler.post { FreeformWindowManager.notifyDesktopChanged() }
+    }
+
+    /**
+     * Anything that fronts our task (taskbar, recents, the app itself) should show the window.
+     */
+    fun onTaskMovedToFront() {
+        if (isDesktop) handler.post { FreeformWindowManager.raiseWindow(this) }
+    }
+
     fun relaunch(target: IIntentSender) {
         FreeformWindowManager.raiseWindow(this)
         if (displayId != Display.INVALID_DISPLAY) {
