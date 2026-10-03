@@ -16,6 +16,7 @@ import android.view.Display
 import android.view.DisplayInfo
 import android.graphics.Matrix
 import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.GestureDetector
 import android.view.IRotationWatcher
 import android.view.MotionEvent
@@ -84,6 +85,8 @@ class FreeformWindow(
     var minimized = false
         private set
     private var secondaryClickActive = false
+    // Desktop windows only take key focus while the user is working in them.
+    private var keyActive = false
     // Held while minimized: the view is detached and the virtual display has no surface.
     private var minimizedTexture: SurfaceTexture? = null
 
@@ -251,6 +254,7 @@ class FreeformWindow(
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouch(view: View, event: MotionEvent): Boolean {
         // Raising re-adds the window, which would cut the gesture short if done before UP.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) activateKeys()
         if (event.actionMasked == MotionEvent.ACTION_UP) handler.post { FreeformWindowManager.raiseWindow(this) }
         if (event.isFromSource(InputDevice.SOURCE_MOUSE) && handleSecondaryClick(event)) return true
         val newEvent = MotionEvent.obtain(event)
@@ -276,6 +280,36 @@ class FreeformWindow(
         newEvent.transform(Matrix().apply { setScale(freeformConfig.scale, freeformConfig.scale) })
         LMOFreeformServiceHolder.touch(newEvent, displayId)
         newEvent.recycle()
+        return true
+    }
+
+    /**
+     * The host's keyboard is associated with the host display, so its keys reach this window only
+     * while it is focusable; they are then forwarded into the app's display.
+     */
+    private fun activateKeys() {
+        if (!isDesktop || keyActive) return
+        val layout = freeformLayout ?: return
+        keyActive = true
+        windowParams.flags = windowParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        runCatching { windowManager.updateViewLayout(layout, windowParams) }
+            .onFailure { Slog.e(TAG, "activateKeys failed: $it") }
+        freeformView?.requestFocus()
+        windowManagerInt.moveDisplayToTopIfAllowed(hostDisplayId)
+    }
+
+    private fun deactivateKeys() {
+        if (!keyActive) return
+        val layout = freeformLayout ?: return
+        keyActive = false
+        windowParams.flags = windowParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        runCatching { windowManager.updateViewLayout(layout, windowParams) }
+            .onFailure { Slog.e(TAG, "deactivateKeys failed: $it") }
+    }
+
+    private fun forwardKey(event: KeyEvent): Boolean {
+        if (displayId == Display.INVALID_DISPLAY) return false
+        LMOFreeformServiceHolder.key(event, displayId)
         return true
     }
 
@@ -326,6 +360,7 @@ class FreeformWindow(
             windowManager.removeViewImmediate(layout)
             freeformView?.setSurfaceTexture(texture)
             windowManager.addView(layout, windowParams)
+            if (keyActive) freeformView?.requestFocus()
         }.onFailure { Slog.e(TAG, "raise failed: $it") }
         keepSurfaceOnDetach = false
     }
@@ -531,6 +566,11 @@ class FreeformWindow(
         freeformView = FreeformTextureView(hostContext).apply {
             setOnTouchListener(this@FreeformWindow)
             setOnGenericMotionListener { _, event -> onGenericMotion(event) }
+            if (isDesktop) {
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setOnKeyListener { _, _, event -> forwardKey(event) }
+            }
             surfaceTextureListener = this@FreeformWindow
         }
         val rootView = freeformRootView ?: return false
@@ -551,6 +591,13 @@ class FreeformWindow(
                     WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
             format = PixelFormat.RGBA_8888
             windowAnimations = android.R.style.Animation_Dialog
+        }
+        if (isDesktop) {
+            windowParams.flags = windowParams.flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+            tmpFreeformLayout.setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) deactivateKeys()
+                false
+            }
         }
         // Set initial positioning based on sidebar position
         setSidebarAwarePosition()

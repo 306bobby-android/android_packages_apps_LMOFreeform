@@ -47,6 +47,7 @@ public class LMOFreeformUIService extends ILMOFreeformUIService.Stub {
         // this.handler = displayManager.getHandler();
 
         SystemServiceHolder.init();
+        new DesktopKeyboardRouter(context, handler);
         LMOFreeformDesktop.setLauncher((target, aInfo, userId, hostDisplayId) ->
                 handler.post(() -> FreeformWindowManager.addDesktopWindow(
                         handler, systemContext, target, aInfo, userId, hostDisplayId)));

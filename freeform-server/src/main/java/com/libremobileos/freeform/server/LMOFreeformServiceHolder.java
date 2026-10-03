@@ -135,6 +135,10 @@ public class LMOFreeformServiceHolder {
         lmoFreeformService.injectInputEvent(event, displayId);
     }
 
+    public static void key(KeyEvent event, int displayId) {
+        lmoFreeformService.injectInputEvent(new KeyEvent(event), displayId);
+    }
+
     public static void back(int displayId) {
         KeyEvent down = new KeyEvent(
                 SystemClock.uptimeMillis(),
