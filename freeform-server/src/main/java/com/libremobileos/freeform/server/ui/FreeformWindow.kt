@@ -408,6 +408,21 @@ class FreeformWindow(
 
     fun getPackageName(): String = appConfig.packageName
 
+    fun getActivityName(): String = appConfig.activityName
+
+    var parked = false
+        private set
+
+    /**
+     * The host display is gone. Turning the app's display OFF stops the app in place until a
+     * desktop display returns.
+     */
+    fun park() {
+        parked = true
+        keyActive = false
+        LMOFreeformServiceHolder.setFreeformSurface(this, null)
+    }
+
     fun onTaskIdChanged() {
         handler.post { FreeformWindowManager.notifyDesktopChanged() }
     }
@@ -475,6 +490,8 @@ class FreeformWindow(
 
     fun measureSize() {
         if (isDesktop) {
+            // A rehosted window keeps the size it had.
+            if (freeformConfig.width > 0 && freeformConfig.height > 0) return
             freeformConfig.apply {
                 width = (defaultDisplayWidth * 0.5).roundToInt()
                 height = (defaultDisplayHeight * 0.7).roundToInt()
@@ -766,7 +783,9 @@ class FreeformWindow(
         }
         
         LMOFreeformServiceHolder.releaseFreeform(this)
-        FreeformWindowManager.removeWindow(getFreeformId())
+        minimizedTexture?.release()
+        minimizedTexture = null
+        FreeformWindowManager.removeWindow(this)
         windowManagerInt.unregisterDisplaySecureContentListener(this)
         
         freeformTaskStackListener?.taskId?.let {

@@ -14,6 +14,7 @@ import android.os.RemoteException;
 import android.util.ArrayMap;
 import android.util.DisplayMetrics;
 import android.util.Slog;
+import android.view.Display;
 
 import com.libremobileos.freeform.ILMOFreeformDesktopListener;
 import com.libremobileos.freeform.LMOFreeformDesktopWindow;
@@ -26,6 +27,12 @@ public class FreeformWindowManager {
     private static final HashMap<String, FreeformWindow> freeformWindows = new HashMap<>(1);
     private static final ArrayMap<Integer, FreeformWindow> topWindows = new ArrayMap<>();
     private static final String TAG = "FreeformWindowManager";
+    private static boolean displayListenerRegistered = false;
+    // Windows whose host display vanished, waiting for a desktop display to come back.
+    private static final ArrayList<FreeformWindow> parkedWindows = new ArrayList<>();
+    // Long enough to cover a flaky cable and answering the mirror/desktop prompt.
+    private static final long PARK_TIMEOUT_MS = 60_000;
+    private static final Runnable parkTimeout = FreeformWindowManager::unparkToDefaultDisplay;
     private static final RemoteCallbackList<ILMOFreeformDesktopListener> desktopListeners =
             new RemoteCallbackList<>();
     // Rebuilt on the system handler, read from binder threads.
@@ -186,5 +193,90 @@ public class FreeformWindowManager {
 
     public static void removeWindow(String freeformId) {
         removeWindow(freeformId, false /*close*/);
+    }
+
+    /** Drops the mapping only if it still belongs to {@code window}, not a replacement. */
+    public static void removeWindow(FreeformWindow window) {
+        if (freeformWindows.get(window.getFreeformId()) == window) {
+            removeWindow(window.getFreeformId());
+        }
+        parkedWindows.remove(window);
+    }
+
+    private static void registerDisplayListener(Handler handler, Context context) {
+        if (displayListenerRegistered) return;
+        displayListenerRegistered = true;
+        context.getSystemService(DisplayManager.class).registerDisplayListener(
+                new DisplayManager.DisplayListener() {
+                    @Override
+                    public void onDisplayAdded(int displayId) {
+                        rehostParked(handler, context, displayId);
+                    }
+
+                    @Override
+                    public void onDisplayChanged(int displayId) {
+                        rehostParked(handler, context, displayId);
+                    }
+
+                    @Override
+                    public void onDisplayRemoved(int displayId) {
+                        // Moving tasks recreates their activities, which some apps don't survive,
+                        // so a brief dropout only parks them.
+                        for (FreeformWindow window : new ArrayList<>(freeformWindows.values())) {
+                            if (window.getHostDisplayId() == displayId && !window.getParked()) {
+                                Slog.i(TAG, "host display " + displayId + " removed, parking "
+                                        + window.getFreeformId());
+                                window.park();
+                                parkedWindows.add(window);
+                            }
+                        }
+                        topWindows.remove(displayId);
+                        if (!parkedWindows.isEmpty()) {
+                            handler.removeCallbacks(parkTimeout);
+                            handler.postDelayed(parkTimeout, PARK_TIMEOUT_MS);
+                        }
+                    }
+                }, handler);
+    }
+
+    /**
+     * Called in system handler
+     */
+    private static void rehostParked(Handler handler, Context context, int displayId) {
+        if (parkedWindows.isEmpty()) return;
+        Display display = context.getSystemService(DisplayManager.class).getDisplay(displayId);
+        // Only a desktop can take them back; a mirroring display hosts no tasks.
+        if (display == null || display.getType() != Display.TYPE_EXTERNAL
+                || !display.canHostTasks()) {
+            return;
+        }
+        handler.removeCallbacks(parkTimeout);
+        for (FreeformWindow old : new ArrayList<>(parkedWindows)) {
+            parkedWindows.remove(old);
+            int taskId = old.getTaskId();
+            if (taskId == -1) {
+                old.destroy("rehost: no task", false);
+                continue;
+            }
+            Slog.i(TAG, "rehosting " + old.getFreeformId() + " on display " + displayId);
+            // The old window lets go once its task moves into the replacement's display.
+            if (freeformWindows.get(old.getFreeformId()) == old) {
+                freeformWindows.remove(old.getFreeformId());
+            }
+            AppConfig appConfig = new AppConfig(old.getPackageName(), old.getActivityName(), null,
+                    old.getUserId(), taskId, null, displayId);
+            // Same size keeps the app from being recreated for a configuration change.
+            FreeformConfig freeformConfig = new FreeformConfig(old.getFreeformConfig().getWidth(),
+                    old.getFreeformConfig().getHeight(), DisplayMetrics.DENSITY_DEFAULT);
+            addWindow(new FreeformWindow(handler, context, appConfig, freeformConfig));
+        }
+    }
+
+    private static void unparkToDefaultDisplay() {
+        for (FreeformWindow window : new ArrayList<>(parkedWindows)) {
+            Slog.i(TAG, "no desktop came back, moving " + window.getFreeformId() + " to default");
+            window.moveToDefaultDisplay();
+        }
+        parkedWindows.clear();
     }
 }
