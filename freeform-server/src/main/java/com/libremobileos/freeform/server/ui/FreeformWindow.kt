@@ -10,6 +10,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.os.SystemClock
+import android.os.SystemProperties
 import android.util.Slog
 import android.view.Display
 import android.view.DisplayInfo
@@ -79,6 +80,7 @@ class FreeformWindow(
     private var appIcon: Drawable? = null
     private var isInitialized = false
     private var keepSurfaceOnDetach = false
+    private val appDensityDpi = context.resources.displayMetrics.densityDpi
     var minimized = false
         private set
     private var secondaryClickActive = false
@@ -117,6 +119,9 @@ class FreeformWindow(
         private const val FREEFORM_LAYOUT = "view_freeform"
         private const val WINDOW_DESTROY_WAIT_MS = 10000L
         private const val LONG_PRESS_SLACK_MS = 100L
+        // Bounds buffer memory; past it the window shows the app slightly larger instead.
+        private const val MAX_APP_DISPLAY_SIZE = 4096
+        private const val PROP_DESKTOP_DPI = "persist.sys.lmofreeform.desktop_dpi"
     }
 
     init {
@@ -416,6 +421,7 @@ class FreeformWindow(
         val maxRefreshRate = hostDisplay.supportedModes
             .maxOfOrNull { it.refreshRate } ?: defaultDisplayInfo.refreshRate
         freeformConfig.apply {
+            if (isDesktop) densityDpi = appDensityDpi
             refreshRate = maxRefreshRate
             presentationDeadlineNanos = if (maxRefreshRate > 0f) {
                 (1_000_000_000L / maxRefreshRate).toLong()
@@ -424,6 +430,12 @@ class FreeformWindow(
             }
             dlog(TAG, "populateFreeformConfig: $this")
         }
+    }
+
+    // How dense the window should look; the app display is scaled to reach it.
+    private fun desktopDensityDpi(): Int {
+        val forced = SystemProperties.getInt(PROP_DESKTOP_DPI, 0)
+        return if (forced > 0) forced else defaultDisplayInfo.logicalDensityDpi
     }
 
     fun measureSize() {
@@ -450,6 +462,19 @@ class FreeformWindow(
     }
 
     fun measureScale() {
+        if (isDesktop) {
+            // Apps also read Resources.getSystem() and their application context, which follow the
+            // phone. Any other density on the app display breaks text in e.g. React Native, so it
+            // keeps the phone's density at a larger size and is scaled down into the window.
+            freeformConfig.apply {
+                val longest = max(width, height).coerceAtLeast(1)
+                scale = min(appDensityDpi.toFloat() / desktopDensityDpi(),
+                        MAX_APP_DISPLAY_SIZE.toFloat() / longest)
+                freeformWidth = (width * scale).roundToInt()
+                freeformHeight = (height * scale).roundToInt()
+            }
+            return
+        }
         freeformConfig.apply {
             val widthScale = min(defaultDisplayWidth, defaultDisplayHeight) * 1.0f / min(width, height)
             val heightScale = max(defaultDisplayWidth, defaultDisplayHeight) * 1.0f / max(width, height)
