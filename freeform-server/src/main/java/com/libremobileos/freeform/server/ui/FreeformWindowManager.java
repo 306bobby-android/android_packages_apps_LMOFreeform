@@ -32,6 +32,14 @@ public class FreeformWindowManager {
         freeformWindows.put(window.getFreeformId(), window);
     }
 
+    public static int countWindowsOn(int hostDisplayId) {
+        int count = 0;
+        for (FreeformWindow window : freeformWindows.values()) {
+            if (window.getHostDisplayId() == hostDisplayId) count++;
+        }
+        return count;
+    }
+
     /**
      * @param freeformId packageName,activityName,userId
      */

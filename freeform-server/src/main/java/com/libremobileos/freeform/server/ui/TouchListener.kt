@@ -53,17 +53,8 @@ class LeftViewClickListener(private val window: FreeformWindow) : View.OnClickLi
  * maximize freeform screen
  */
 class MaximizeClickListener(private val window: FreeformWindow): View.OnClickListener {
-    companion object {
-        private const val TAG = "LMOFreeform/TouchListener"
-    }
     override fun onClick(v: View) {
-        if (null != window.freeformTaskStackListener) {
-            if (window.freeformTaskStackListener!!.taskId == -1) {
-                Slog.e(TAG, "taskId is -1, can`t move")
-                return
-            }
-            runCatching { SystemServiceHolder.activityTaskManager.moveRootTaskToDisplay(window.freeformTaskStackListener!!.taskId, Display.DEFAULT_DISPLAY) }
-        }
+        window.maximize()
     }
 }
 
@@ -107,7 +98,7 @@ class ScaleTouchListener(private val window: FreeformWindow, private val isRight
                     val yDelta = event.rawY - startY
                     width = max(25, (rootView.width + xDelta).roundToInt())
                     height = max(25, (rootView.height + yDelta).roundToInt())
-                    if (width > height) {
+                    if (!window.isDesktop && width > height) {
                         if (xDelta < 0) width = height
                         else height = width
                     }

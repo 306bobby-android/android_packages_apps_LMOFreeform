@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.drawable.Drawable
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.util.Slog
@@ -42,10 +43,21 @@ class FreeformWindow(
     WindowManagerInternal.DisplaySecureContentListener {
 
     var freeformTaskStackListener: FreeformTaskStackListener? = null
-    val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    val hostDisplayId = appConfig.hostDisplayId
+    val isDesktop = hostDisplayId != Display.DEFAULT_DISPLAY
+    private val hostDisplay: Display =
+        context.getSystemService(DisplayManager::class.java).getDisplay(hostDisplayId) ?: context.display
+    // Overlay, metrics and inflated resources must all belong to the display the window lives on.
+    private val hostContext: Context = if (isDesktop) {
+        context.createDisplayContext(hostDisplay)
+            .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+    } else {
+        context
+    }
+    val windowManager = hostContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val windowManagerInt = LocalServices.getService(WindowManagerInternal::class.java)
     val windowParams = WindowManager.LayoutParams()
-    private val resourceHolder = RemoteResourceHolder(context, FREEFORM_PACKAGE)
+    private val resourceHolder = RemoteResourceHolder(hostContext, FREEFORM_PACKAGE)
     var freeformLayout: ViewGroup? = null
     var freeformRootView: ViewGroup? = null
     var freeformView: TextureView? = null
@@ -53,9 +65,9 @@ class FreeformWindow(
     private var bottomBarView: View? = null
     var veilView: ViewGroup? = null
     private var displayId = Display.INVALID_DISPLAY
-    var defaultDisplayWidth = context.resources.displayMetrics.widthPixels
-    var defaultDisplayHeight = context.resources.displayMetrics.heightPixels
-    var defaultDisplayRotation = context.display.rotation
+    var defaultDisplayWidth = hostContext.resources.displayMetrics.widthPixels
+    var defaultDisplayHeight = hostContext.resources.displayMetrics.heightPixels
+    var defaultDisplayRotation = hostDisplay.rotation
     private val hangUpGestureListener = HangUpGestureListener(this)
     private val defaultDisplayInfo = DisplayInfo()
     private val destroyRunnable = Runnable { destroy("destroyRunnable", true) }
@@ -67,9 +79,9 @@ class FreeformWindow(
     private val rotationWatcher = object : IRotationWatcher.Stub() {
         override fun onRotationChanged(rotation: Int) {
             dlog(TAG, "onRotationChanged($rotation)")
-            defaultDisplayWidth = context.resources.displayMetrics.widthPixels
-            defaultDisplayHeight = context.resources.displayMetrics.heightPixels
-            defaultDisplayRotation = context.display.rotation
+            defaultDisplayWidth = hostContext.resources.displayMetrics.widthPixels
+            defaultDisplayHeight = hostContext.resources.displayMetrics.heightPixels
+            defaultDisplayRotation = hostDisplay.rotation
             measureSize()
             handler.post {
                 changeOrientation()
@@ -231,13 +243,33 @@ class FreeformWindow(
     }
 
     /**
+     * Moves the app to the display hosting this window, fullscreen.
+     */
+    fun maximize() {
+        val taskId = freeformTaskStackListener?.taskId ?: -1
+        if (taskId == -1) {
+            Slog.e(TAG, "taskId is -1, can`t move")
+            return
+        }
+        runCatching { SystemServiceHolder.activityTaskManager.moveRootTaskToDisplay(taskId, hostDisplayId) }
+    }
+
+    fun moveToDefaultDisplay() {
+        val taskId = freeformTaskStackListener?.taskId ?: -1
+        runCatching {
+            if (taskId == -1) throw IllegalStateException("no task")
+            SystemServiceHolder.activityTaskManager.moveRootTaskToDisplay(taskId, Display.DEFAULT_DISPLAY)
+        }.onFailure { destroy("moveToDefaultDisplay: $it", true) }
+    }
+
+    /**
      * get freeform screen dimen / freeform view dimen
      */
     private fun populateFreeformConfig() {
+        hostDisplay.getDisplayInfo(defaultDisplayInfo)
         measureSize()
         measureScale()
-        context.display.getDisplayInfo(defaultDisplayInfo)
-        val maxRefreshRate = context.display.supportedModes
+        val maxRefreshRate = hostDisplay.supportedModes
             .maxOfOrNull { it.refreshRate } ?: defaultDisplayInfo.refreshRate
         freeformConfig.apply {
             refreshRate = maxRefreshRate
@@ -251,6 +283,13 @@ class FreeformWindow(
     }
 
     fun measureSize() {
+        if (isDesktop) {
+            freeformConfig.apply {
+                width = (defaultDisplayWidth * 0.5).roundToInt()
+                height = (defaultDisplayHeight * 0.7).roundToInt()
+            }
+            return
+        }
         val isPortrait = defaultDisplayRotation == Surface.ROTATION_0 ||
                 defaultDisplayRotation == Surface.ROTATION_180
         freeformConfig.apply {
@@ -316,7 +355,7 @@ class FreeformWindow(
         leftScaleView.setOnTouchListener(ScaleTouchListener(this, false))
         rightScaleView.setOnTouchListener(ScaleTouchListener(this))
 
-        freeformView = FreeformTextureView(context).apply {
+        freeformView = FreeformTextureView(hostContext).apply {
             setOnTouchListener(this@FreeformWindow)
             surfaceTextureListener = this@FreeformWindow
         }
@@ -344,7 +383,7 @@ class FreeformWindow(
         
         runCatching {
             windowManager.addView(freeformLayout, windowParams)
-            SystemServiceHolder.windowManager.watchRotation(rotationWatcher, Display.DEFAULT_DISPLAY)
+            SystemServiceHolder.windowManager.watchRotation(rotationWatcher, hostDisplayId)
             windowManagerInt.registerDisplaySecureContentListener(this)
         }.onFailure {
             Slog.e(TAG, "addView failed: $it")
@@ -533,6 +572,14 @@ class FreeformWindow(
     }
     
     private fun setSidebarAwarePosition() {
+        if (isDesktop) {
+            // Cascade so a new window never lands exactly on top of the previous one.
+            // This window is already registered by the time it is laid out.
+            val offset = 48 * ((FreeformWindowManager.countWindowsOn(hostDisplayId) - 1) % 6)
+            windowParams.x = offset
+            windowParams.y = offset - defaultDisplayHeight / 16
+            return
+        }
         val isLandscape = defaultDisplayWidth > defaultDisplayHeight
         val windowWidth = freeformConfig.width
         val margin = 80 // pixels from edge
