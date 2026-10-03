@@ -9,6 +9,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
+import android.os.SystemClock
 import android.util.Slog
 import android.view.Display
 import android.view.DisplayInfo
@@ -20,6 +21,7 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -76,6 +78,7 @@ class FreeformWindow(
     private var appPackageName: String = ""
     private var appIcon: Drawable? = null
     private var isInitialized = false
+    private var secondaryClickActive = false
 
     private val rotationWatcher = object : IRotationWatcher.Stub() {
         override fun onRotationChanged(rotation: Int) {
@@ -108,6 +111,7 @@ class FreeformWindow(
         private const val FREEFORM_PACKAGE = "com.libremobileos.freeform"
         private const val FREEFORM_LAYOUT = "view_freeform"
         private const val WINDOW_DESTROY_WAIT_MS = 10000L
+        private const val LONG_PRESS_SLACK_MS = 100L
     }
 
     init {
@@ -235,15 +239,62 @@ class FreeformWindow(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouch(view: View, event: MotionEvent): Boolean {
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE) && handleSecondaryClick(event)) return true
         val newEvent = MotionEvent.obtain(event)
         val scaleMatrix = Matrix().apply {
             setScale(freeformConfig.scale, freeformConfig.scale)
         }
         newEvent.transform(scaleMatrix)
-        newEvent.setSource(InputDevice.SOURCE_TOUCHSCREEN)
+        // Mice keep their source so buttons (right-click menus) and tool type still mean something.
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) newEvent.setSource(InputDevice.SOURCE_TOUCHSCREEN)
         LMOFreeformServiceHolder.touch(newEvent, displayId)
         newEvent.recycle()
         return true
+    }
+
+    /**
+     * Mouse hover, wheel and button press/release never reach onTouch; forward them as-is.
+     */
+    private fun onGenericMotion(event: MotionEvent): Boolean {
+        if (!event.isFromSource(InputDevice.SOURCE_CLASS_POINTER)) return false
+        // Secondary button press/release belong to the long-press replayed by handleSecondaryClick.
+        if (event.actionButton == MotionEvent.BUTTON_SECONDARY) return true
+        val newEvent = MotionEvent.obtain(event)
+        newEvent.transform(Matrix().apply { setScale(freeformConfig.scale, freeformConfig.scale) })
+        LMOFreeformServiceHolder.touch(newEvent, displayId)
+        newEvent.recycle()
+        return true
+    }
+
+    /**
+     * Few apps implement context click, while desktop users expect right-click to act like a
+     * long-press, so the whole secondary-button gesture is replayed as a touchscreen long-press.
+     */
+    private fun handleSecondaryClick(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            if (event.buttonState and MotionEvent.BUTTON_SECONDARY == 0) return false
+            secondaryClickActive = true
+            val x = event.x * freeformConfig.scale
+            val y = event.y * freeformConfig.scale
+            val downTime = SystemClock.uptimeMillis()
+            injectTouch(downTime, MotionEvent.ACTION_DOWN, x, y)
+            handler.postDelayed({ injectTouch(downTime, MotionEvent.ACTION_UP, x, y) },
+                ViewConfiguration.getLongPressTimeout() + LONG_PRESS_SLACK_MS)
+            return true
+        }
+        if (!secondaryClickActive) return false
+        if (event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            secondaryClickActive = false
+        }
+        return true
+    }
+
+    private fun injectTouch(downTime: Long, action: Int, x: Float, y: Float) {
+        val touch = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
+        touch.source = InputDevice.SOURCE_TOUCHSCREEN
+        LMOFreeformServiceHolder.touch(touch, displayId)
+        touch.recycle()
     }
 
     fun relaunch(target: IIntentSender) {
@@ -368,6 +419,7 @@ class FreeformWindow(
 
         freeformView = FreeformTextureView(hostContext).apply {
             setOnTouchListener(this@FreeformWindow)
+            setOnGenericMotionListener { _, event -> onGenericMotion(event) }
             surfaceTextureListener = this@FreeformWindow
         }
         val rootView = freeformRootView ?: return false
