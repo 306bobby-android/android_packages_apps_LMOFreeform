@@ -68,14 +68,16 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
     public void createFreeformLocked(String name, ILMOFreeformDisplayCallback callback,
                                      int width, int height, int densityDpi,
                                      boolean secure, boolean ownContentOnly, boolean shouldShowSystemDecorations,
-                                     Surface surface, float refreshRate, long presentationDeadlineNanos) {
+                                     Surface surface, float refreshRate, long presentationDeadlineNanos,
+                                     int hostDisplayId) {
         synchronized (getSyncRoot()) {
             IBinder appToken = callback.asBinder();
             FreeformFlags flags = new FreeformFlags(secure, ownContentOnly, shouldShowSystemDecorations);
 	    IBinder displayToken = DisplayControl.createVirtualDisplay(name, flags.mSecure, false /* optimizeForPower */, UNIQUE_ID_PREFIX + name, Process.myUid(), refreshRate);
             FreeformDisplayDevice device = new FreeformDisplayDevice(displayToken, UNIQUE_ID_PREFIX + name, width, height, densityDpi,
                     refreshRate, presentationDeadlineNanos,
-                    flags, surface, new Callback(callback, mHandler), callback.asBinder());
+                    flags, surface, new Callback(callback, mHandler), callback.asBinder(),
+                    hostDisplayId);
 
             sendDisplayDeviceEventLocked(device, DISPLAY_DEVICE_EVENT_ADDED);
             mFreeformDisplayDevices.put(appToken, device);
@@ -162,6 +164,7 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
 
         protected final Callback mCallback;
         protected final IBinder mAppToken;
+        private final int mHostDisplayId;
 
         private int mPendingChanges;
 
@@ -169,7 +172,8 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
                               int width, int height, int density,
                               float refreshRate, long presentationDeadlineNanos,
                               FreeformFlags flags,
-                              Surface surface, Callback callback, IBinder appToken) {
+                              Surface surface, Callback callback, IBinder appToken,
+                              int hostDisplayId) {
 
        super(LMOFreeformDisplayAdapter.this, displayToken, uniqueId, getContext());
             mName = uniqueId;
@@ -183,6 +187,7 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
             mMode = createMode(mWidth, mHeight, refreshRate);
             mCallback = callback;
             mAppToken = appToken;
+            mHostDisplayId = hostDisplayId;
             mPendingChanges |= PENDING_SURFACE_CHANGE;
         }
 
@@ -196,6 +201,11 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
                 mDensityDpi = densityDpi;
                 mInfo = null;
             }
+        }
+
+        /** The display the LMO window showing this display is drawn on. */
+        public int getHostDisplayId() {
+            return mHostDisplayId;
         }
 
         // A null surface turns the display OFF, which puts its activities to sleep.

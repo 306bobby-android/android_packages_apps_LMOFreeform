@@ -21,11 +21,12 @@ public class LMOFreeformService {
     public void createFreeform(String name, ILMOFreeformDisplayCallback callback,
                                int width, int height, int densityDpi, boolean secure,
                                boolean ownContentOnly, boolean shouldShowSystemDecorations, Surface surface,
-                               float refreshRate, long presentationDeadlineNanos) {
+                               float refreshRate, long presentationDeadlineNanos,
+                               int hostDisplayId) {
         displayManager.createFreeformLocked(name, callback,
                 width, height, densityDpi, secure,
                 ownContentOnly, shouldShowSystemDecorations, surface,
-                refreshRate, presentationDeadlineNanos);
+                refreshRate, presentationDeadlineNanos, hostDisplayId);
         dlog(TAG, "createFreeform");
     }
 

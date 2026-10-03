@@ -14,6 +14,7 @@ import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.util.ArrayMap;
 import android.util.Slog;
+import android.view.Display;
 import android.view.Surface;
 
 import java.util.Map;
@@ -96,7 +97,7 @@ public class LMOFreeformUIService extends ILMOFreeformUIService.Stub {
                 name, callback,
                 width, height, densityDpi,
                 secure, ownContentOnly, shouldShowSystemDecorations,
-                surface, refreshRate, presentationDeadlineNanos
+                surface, refreshRate, presentationDeadlineNanos, Display.DEFAULT_DISPLAY
         );
     }
 
