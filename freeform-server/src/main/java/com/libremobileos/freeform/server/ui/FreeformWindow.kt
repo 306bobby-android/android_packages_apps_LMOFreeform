@@ -78,7 +78,12 @@ class FreeformWindow(
     private var appPackageName: String = ""
     private var appIcon: Drawable? = null
     private var isInitialized = false
+    private var keepSurfaceOnDetach = false
+    var minimized = false
+        private set
     private var secondaryClickActive = false
+    // Held while minimized: the view is detached and the virtual display has no surface.
+    private var minimizedTexture: SurfaceTexture? = null
 
     private val rotationWatcher = object : IRotationWatcher.Stub() {
         override fun onRotationChanged(rotation: Int) {
@@ -157,7 +162,8 @@ class FreeformWindow(
     }
 
     override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
-        return true
+        // The virtual display renders into this texture, so it must survive a raise() re-add.
+        return !keepSurfaceOnDetach
     }
 
     override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) {
@@ -239,6 +245,8 @@ class FreeformWindow(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouch(view: View, event: MotionEvent): Boolean {
+        // Raising re-adds the window, which would cut the gesture short if done before UP.
+        if (event.actionMasked == MotionEvent.ACTION_UP) handler.post { FreeformWindowManager.raiseWindow(this) }
         if (event.isFromSource(InputDevice.SOURCE_MOUSE) && handleSecondaryClick(event)) return true
         val newEvent = MotionEvent.obtain(event)
         val scaleMatrix = Matrix().apply {
@@ -295,6 +303,61 @@ class FreeformWindow(
         touch.source = InputDevice.SOURCE_TOUCHSCREEN
         LMOFreeformServiceHolder.touch(touch, displayId)
         touch.recycle()
+    }
+
+    /**
+     * Same-type overlays stack in add order, so re-adding is the only way to bring one to front.
+     * Called in system handler
+     */
+    fun raise() {
+        if (minimized) {
+            restore()
+            return
+        }
+        val layout = freeformLayout ?: return
+        val texture = freeformView?.surfaceTexture ?: return
+        keepSurfaceOnDetach = true
+        runCatching {
+            windowManager.removeViewImmediate(layout)
+            freeformView?.setSurfaceTexture(texture)
+            windowManager.addView(layout, windowParams)
+        }.onFailure { Slog.e(TAG, "raise failed: $it") }
+        keepSurfaceOnDetach = false
+    }
+
+    /**
+     * Detaching the surface turns the virtual display OFF, so the app is stopped like any
+     * minimized desktop task instead of rendering into a texture nobody consumes.
+     * Called in system handler
+     */
+    fun minimize() {
+        if (!isDesktop || minimized) return
+        val layout = freeformLayout ?: return
+        val texture = freeformView?.surfaceTexture ?: return
+        keepSurfaceOnDetach = true
+        runCatching { windowManager.removeViewImmediate(layout) }
+            .onFailure { Slog.e(TAG, "minimize failed: $it") }
+        keepSurfaceOnDetach = false
+        LMOFreeformServiceHolder.setFreeformSurface(this, null)
+        minimizedTexture = texture
+        minimized = true
+        FreeformWindowManager.onWindowMinimized(this)
+    }
+
+    /**
+     * Called in system handler
+     */
+    fun restore() {
+        val texture = minimizedTexture ?: return
+        val layout = freeformLayout ?: return
+        minimizedTexture = null
+        minimized = false
+        LMOFreeformServiceHolder.setFreeformSurface(this, Surface(texture))
+        runCatching {
+            freeformView?.setSurfaceTexture(texture)
+            windowManager.addView(layout, windowParams)
+        }.onFailure { Slog.e(TAG, "restore failed: $it") }
+        FreeformWindowManager.onWindowRestored(this)
     }
 
     fun relaunch(target: IIntentSender) {
@@ -401,6 +464,10 @@ class FreeformWindow(
         val leftScaleView = resourceHolder.getLayoutChildViewByTag<View>(tmpFreeformLayout, "leftScaleView")
         val rightScaleView = resourceHolder.getLayoutChildViewByTag<View>(tmpFreeformLayout, "rightScaleView")
         val veilAppIconView = resourceHolder.getLayoutChildViewByTag<ImageView>(tmpFreeformLayout, "veilAppIcon")
+        resourceHolder.getLayoutChildViewByTag<View>(tmpFreeformLayout, "hideView")?.takeIf { isDesktop }?.apply {
+            visibility = View.VISIBLE
+            setOnClickListener { handler.post { minimize() } }
+        }
         if (null == minimizeView || null == leftScaleView || null == rightScaleView 
                 || null == maximizeView || null == pinView || null == appIconView || null == packageNameView
                 || null == veilAppIconView) {

@@ -114,6 +114,10 @@ public class LMOFreeformUIService extends ILMOFreeformUIService.Stub {
         displayManager.releaseFreeform(appToken);
     }
 
+    public void setFreeformSurface(IBinder appToken, Surface surface) {
+        displayManager.setFreeformSurface(appToken, surface);
+    }
+
     @Override
     public boolean ping() {
         if (Binder.getCallingUid() != SYSTEM_UID) {

@@ -17,6 +17,7 @@ import java.util.HashMap;
 
 public class FreeformWindowManager {
     private static final HashMap<String, FreeformWindow> freeformWindows = new HashMap<>(1);
+    private static final ArrayMap<Integer, FreeformWindow> topWindows = new ArrayMap<>();
     private static final String TAG = "FreeformWindowManager";
 
     public static void addWindow(
@@ -57,6 +58,32 @@ public class FreeformWindowManager {
             oldWindow.destroy("addWindow", false);
         }
         freeformWindows.put(window.getFreeformId(), window);
+        topWindows.put(window.getHostDisplayId(), window);
+    }
+
+    /**
+     * Called in system handler
+     */
+    public static void raiseWindow(FreeformWindow window) {
+        if (!window.isDesktop() || topWindows.get(window.getHostDisplayId()) == window) return;
+        window.raise();
+        topWindows.put(window.getHostDisplayId(), window);
+    }
+
+    /**
+     * Called in system handler
+     */
+    public static void onWindowMinimized(FreeformWindow window) {
+        if (topWindows.get(window.getHostDisplayId()) == window) {
+            topWindows.remove(window.getHostDisplayId());
+        }
+    }
+
+    /**
+     * Called in system handler
+     */
+    public static void onWindowRestored(FreeformWindow window) {
+        topWindows.put(window.getHostDisplayId(), window);
     }
 
     public static int countWindowsOn(int hostDisplayId) {
@@ -72,6 +99,10 @@ public class FreeformWindowManager {
      */
     public static void removeWindow(String freeformId, Boolean close) {
         FreeformWindow removedWindow = freeformWindows.remove(freeformId);
+        if (removedWindow != null
+                && topWindows.get(removedWindow.getHostDisplayId()) == removedWindow) {
+            topWindows.remove(removedWindow.getHostDisplayId());
+        }
         if (close && removedWindow != null)
             removedWindow.close();
     }

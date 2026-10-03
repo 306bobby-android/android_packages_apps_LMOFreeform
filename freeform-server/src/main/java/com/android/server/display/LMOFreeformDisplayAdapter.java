@@ -125,6 +125,15 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
         }
     }
 
+    public void setFreeformSurface(IBinder appToken, Surface surface) {
+        synchronized (getSyncRoot()) {
+            FreeformDisplayDevice device = mFreeformDisplayDevices.get(appToken);
+            if (device != null) {
+                device.setSurfaceLocked(surface);
+            }
+        }
+    }
+
     public Handler getUiHandler() {
         return mUiHandler;
     }
@@ -187,6 +196,21 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
                 mDensityDpi = densityDpi;
                 mInfo = null;
             }
+        }
+
+        // A null surface turns the display OFF, which puts its activities to sleep.
+        public void setSurfaceLocked(Surface surface) {
+            if (mSurface == surface) return;
+            if ((mSurface == null) != (surface == null)) {
+                mInfo = null;
+                sendDisplayDeviceEventLocked(this, DISPLAY_DEVICE_EVENT_CHANGED);
+            }
+            sendTraversalRequestLocked();
+            if (mSurface != null) {
+                mSurface.release();
+            }
+            mSurface = surface;
+            mPendingChanges |= PENDING_SURFACE_CHANGE;
         }
 
         private Display.Mode createMode(int width, int height, float refreshRate) {
@@ -264,6 +288,7 @@ public class LMOFreeformDisplayAdapter extends DisplayAdapter {
                 if (mFlags.mShouldShowSystemDecorations) {
                     mInfo.flags |= DisplayDeviceInfo.FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS;
                 }
+                mInfo.state = mSurface != null ? Display.STATE_ON : Display.STATE_OFF;
                 mInfo.type = Display.TYPE_OVERLAY;
                 mInfo.touch = DisplayDeviceInfo.TOUCH_VIRTUAL;
                 // The display is trusted since it is created by system.

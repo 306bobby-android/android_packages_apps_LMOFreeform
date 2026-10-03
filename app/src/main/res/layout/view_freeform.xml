@@ -59,6 +59,17 @@
                 android:layout_marginEnd="6dp"
                 android:tag="pinView"
                 android:src="@drawable/ic_pin"
+                app:layout_constraintEnd_toStartOf="@id/hideView"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
+            <ImageView
+                android:id="@+id/hideView"
+                android:layout_width="24dp"
+                android:layout_height="16dp"
+                android:layout_marginEnd="6dp"
+                android:tag="hideView"
+                android:src="@drawable/ic_hide"
+                android:visibility="gone"
                 app:layout_constraintEnd_toStartOf="@id/maximizeView"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintBottom_toBottomOf="parent" />

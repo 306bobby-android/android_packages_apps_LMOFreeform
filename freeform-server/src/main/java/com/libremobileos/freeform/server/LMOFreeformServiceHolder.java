@@ -163,6 +163,10 @@ public class LMOFreeformServiceHolder {
         lmoFreeformUIService.resizeFreeform(token, width, height, density);
     }
 
+    public static void setFreeformSurface(IBinder token, Surface surface) {
+        lmoFreeformUIService.setFreeformSurface(token, surface);
+    }
+
     public static void releaseFreeform(IBinder token) {
         lmoFreeformUIService.releaseFreeform(token);
     }

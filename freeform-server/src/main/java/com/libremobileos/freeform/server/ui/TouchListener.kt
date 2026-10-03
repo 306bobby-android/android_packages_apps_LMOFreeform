@@ -36,6 +36,7 @@ class MoveTouchListener(
             }
             MotionEvent.ACTION_UP -> {
                 window.makeSureFreeformInScreen()
+                window.handler.post { FreeformWindowManager.raiseWindow(window) }
             }
         }
         return true
